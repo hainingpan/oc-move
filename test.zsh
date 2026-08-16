@@ -129,13 +129,14 @@ t6_family_already_in_dest() {  # guard counted the mover's own family as bystand
 
 t7_bystanders_absorbed_but_not_reordered() {
   # The ~/.git disaster was 274 sessions being re-scoped AND jumping to "today".
-  # Blocking the move was the wrong cure - it stopped legitimate moves (example-folder).
+  # Blocking the move was the wrong cure - it stopped legitimate moves into any folder
+  # that happened to already hold an unrelated session tree.
   # Correct contract: the move proceeds, bystanders get grouped into the project that
   # matches the directory they already live in, and NO timestamp changes.
   local dest=$RUN/t7dest; mkdir -p $dest
   local d=$(cd $dest && pwd -P)
   seed_session ses_t7root  - $RUN/src "t7 root"      1700000000000
-  # bystander sits in the 'global' catch-all, exactly like the real example-folder case
+  # bystander sits in the 'global' catch-all - only those get absorbed, as in the real case
   seed_session ses_t7other - $d       "t7 bystander" 1700000005000 8 global
   local out rc
   out=$(oc-move ses_t7root $dest 2>&1); rc=$?

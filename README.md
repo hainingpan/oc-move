@@ -6,10 +6,15 @@ opencode has no `session move`. `export`/`import` is the only official path, and
 incomplete. This wraps it and patches the gaps.
 
 ```bash
+oc-move <session-id> <destination-folder>
+
+# e.g.
 oc-move ses_4f1c9a2e7b3d8Kp2QmXvNhTzLd ~/projects/my-app
 ```
 
 ## Install
+
+Clone anywhere; adjust both paths below to match.
 
 ```bash
 git clone <repo-url> ~/tools/oc-move
@@ -18,12 +23,12 @@ echo 'source ~/tools/oc-move/oc-move.zsh' >> ~/.zshrc && source ~/.zshrc
 
 ## Sync between machines
 
-Installed on each machine; both `source` this file, so there is one
-version rather than two drifting copies.
+Each machine `source`s this one file, so there is a single version rather than
+several drifting copies.
 
 ```bash
 cd ~/tools/oc-move
-git pull                      # pick up changes made on the other machine
+git pull                      # pick up changes made on another machine
 ./test.zsh                    # ALWAYS before trusting a pulled change
 source ~/.zshrc               # reload the function in the current shell
 ```
@@ -35,7 +40,7 @@ After editing:
 ```
 
 `.backups/` is gitignored and stays local — it holds full copies of `~/.zshrc`,
-which contain live API keys. Do not remove that ignore rule.
+which typically contain live API keys. Do not remove that ignore rule.
 
 ## Test
 
@@ -100,5 +105,5 @@ Every one of these is a bug that actually shipped and broke something.
 ## Layout
 
     oc-move.zsh   the function
-    test.zsh      regression suite (isolated; 22 assertions)
-    .backups/     copies of ~/.zshrc from both machines (gitignored)
+    test.zsh      regression suite (isolated; 25 assertions)
+    .backups/     local ~/.zshrc copies (gitignored — see above)

@@ -1,7 +1,7 @@
 # Move an opencode session + its subagents to another folder (no built-in exists).
 # import re-scopes to the CWD and needs a git repo WITH a commit, else it lands in
 # "global"; the SQL drags subagents along since export omits them (anomalyco/opencode#40352).
-# Usage:  oc-move ses_4f1c9a2e7b3d8Kp2QmXvNhTzLd ~/projects/my-app
+# Usage:  oc-move <session-id> <destination-folder>
 oc-move() {
   # ${1-} not $1, so the usage message still works under `set -u` / setopt nounset.
   # resolve the DB the same way opencode itself does, so tests can isolate via XDG_DATA_HOME
