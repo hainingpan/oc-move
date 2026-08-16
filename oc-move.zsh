@@ -3,7 +3,9 @@
 # "global"; the SQL drags subagents along since export omits them (anomalyco/opencode#40352).
 # Usage:  oc-move ses_4f1c9a2e7b3d8Kp2QmXvNhTzLd ~/projects/my-app
 oc-move() {
-  local sid=$1 dst=$2 db=$HOME/.local/share/opencode/opencode.db
+  # ${1-} not $1, so the usage message still works under `set -u` / setopt nounset.
+  # resolve the DB the same way opencode itself does, so tests can isolate via XDG_DATA_HOME
+  local sid=${1-} dst=${2-} db=${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db
   [[ -n $sid && -n $dst ]] || { print -u2 "usage: oc-move <session-id> <folder>"; return 1 }
   # the session plus every subagent it spawned - these all move together
   local fam="WITH RECURSIVE d(id) AS (SELECT '$sid'
