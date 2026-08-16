@@ -12,8 +12,30 @@ oc-move ses_4f1c9a2e7b3d8Kp2QmXvNhTzLd ~/projects/my-app
 ## Install
 
 ```bash
+git clone <repo-url> ~/tools/oc-move
 echo 'source ~/tools/oc-move/oc-move.zsh' >> ~/.zshrc && source ~/.zshrc
 ```
+
+## Sync between machines
+
+Installed on each machine; both `source` this file, so there is one
+version rather than two drifting copies.
+
+```bash
+cd ~/tools/oc-move
+git pull                      # pick up changes made on the other machine
+./test.zsh                    # ALWAYS before trusting a pulled change
+source ~/.zshrc               # reload the function in the current shell
+```
+
+After editing:
+
+```bash
+./test.zsh && git commit -am "..." && git push
+```
+
+`.backups/` is gitignored and stays local — it holds full copies of `~/.zshrc`,
+which contain live API keys. Do not remove that ignore rule.
 
 ## Test
 
