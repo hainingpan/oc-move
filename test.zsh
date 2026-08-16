@@ -44,17 +44,21 @@ setup() {
 
 MODEL='{"id":"claude-opus-5","providerID":"anthropic","variant":"max"}'
 
-# seed_session <id> <parent|-> <directory> <title> <ts_ms> [body_chars]
+# seed_session <id> <parent|-> <directory> <title> <ts_ms> [body_chars] [project]
+# project defaults to 'seedproj'. Use 'global' to model a session in opencode's
+# catch-all - only those get absorbed when a directory becomes a git project.
 seed_session() {
-  local id=$1 parent=$2 dir=$3 title=$4 ts=$5 chars=${6:-8}
+  local id=$1 parent=$2 dir=$3 title=$4 ts=$5 chars=${6:-8} proj=${7:-seedproj}
   local psql; [[ $parent == "-" ]] && psql=NULL || psql="'$parent'"
   local body; body=$(head -c $chars < /dev/zero | tr '\0' 'x')
   sqlite3 "$DB" "
     INSERT OR IGNORE INTO project (id,worktree,vcs,name,time_created,time_updated,sandboxes)
       VALUES ('seedproj','$RUN/seedsrc','git','seed',$ts,$ts,'[]');
+    INSERT OR IGNORE INTO project (id,worktree,vcs,name,time_created,time_updated,sandboxes)
+      VALUES ('global','/','git','global',$ts,$ts,'[]');
     INSERT INTO session (id,project_id,parent_id,slug,directory,title,version,
                          time_created,time_updated,agent,model)
-      VALUES ('$id','seedproj',$psql,'s-$id','$dir','$title','1.18.18',$ts,$ts,'build',json('$MODEL'));
+      VALUES ('$id','$proj',$psql,'s-$id','$dir','$title','1.18.18',$ts,$ts,'build',json('$MODEL'));
     INSERT INTO message (id,session_id,time_created,time_updated,data)
       VALUES ('msg_$id','$id',$ts,$ts, json('{\"role\":\"user\",\"time\":{\"created\":$ts},\"agent\":\"build\",\"model\":{\"providerID\":\"anthropic\",\"modelID\":\"claude-opus-5\",\"variant\":\"max\"},\"summary\":{\"diffs\":[]}}'));
     INSERT INTO part (id,message_id,session_id,time_created,time_updated,data)
@@ -123,17 +127,34 @@ t6_family_already_in_dest() {  # guard counted the mover's own family as bystand
   if [[ $out == *abort* ]]; then bad "must not abort on own family - got [$out]"; else ok "no false abort"; fi
 }
 
-t7_unrelated_bystanders_block() {  # the ~/.git disaster: 274 sessions swept
+t7_bystanders_absorbed_but_not_reordered() {
+  # The ~/.git disaster was 274 sessions being re-scoped AND jumping to "today".
+  # Blocking the move was the wrong cure - it stopped legitimate moves (example-folder).
+  # Correct contract: the move proceeds, bystanders get grouped into the project that
+  # matches the directory they already live in, and NO timestamp changes.
   local dest=$RUN/t7dest; mkdir -p $dest
-  seed_session ses_t7root  - $RUN/src   "t7 root"      1700000000000
-  seed_session ses_t7other - ${dest:A}  "t7 bystander" 1700000005000
+  local d=$(cd $dest && pwd -P)
+  seed_session ses_t7root  - $RUN/src "t7 root"      1700000000000
+  # bystander sits in the 'global' catch-all, exactly like the real example-folder case
+  seed_session ses_t7other - $d       "t7 bystander" 1700000005000 8 global
   local out rc
   out=$(oc-move ses_t7root $dest 2>&1); rc=$?
-  check "aborts" "$rc" "1"
-  if [[ $out == *abort* ]]; then ok "prints abort reason"; else bad "no abort message - got [$out]"; fi
-  if [[ -d $dest/.git ]]; then bad "must not git init on abort"; else ok "no .git created"; fi
-  check "bystander project untouched" "$(q "SELECT project_id FROM session WHERE id='ses_t7other'")" "seedproj"
-  check "bystander timestamp untouched" "$(q "SELECT time_updated FROM session WHERE id='ses_t7other'")" "1700000005000"
+  check "move proceeds" "$rc" "0"
+  check "bystander timestamp NOT bumped" "$(q "SELECT time_updated FROM session WHERE id='ses_t7other'")" "1700000005000"
+  check "moved session landed" "$(q "SELECT directory FROM session WHERE id='ses_t7root'")" "$d"
+  # bystander should now share the destination's project rather than sitting in the catch-all
+  check "bystander grouped with dir" \
+    "$(q "SELECT (SELECT project_id FROM session WHERE id='ses_t7other')=(SELECT project_id FROM session WHERE id='ses_t7root')")" "1"
+  if [[ $out == *"joined this project"* ]]; then ok "reports what it absorbed"; else bad "no note about bystanders - got [$out]"; fi
+}
+
+t11_refuses_home() {  # the actual hazard: $HOME as a git repo breaks every subdirectory
+  seed_session ses_t11root - $RUN/src "t11" 1700000000000
+  local out rc
+  out=$(oc-move ses_t11root "$HOME" 2>&1); rc=$?
+  check "refuses \$HOME" "$rc" "1"
+  if [[ $out == *refusing* ]]; then ok "explains refusal"; else bad "no refusal message - got [$out]"; fi
+  if [[ -d $HOME/.git ]]; then bad "MUST NOT create ~/.git"; else ok "no ~/.git created"; fi
 }
 
 t8_timestamps_preserved() {  # user's core complaint: moves must not reorder the session list
@@ -161,8 +182,8 @@ t10_messages_survive() {
 # ---------------------------------------------------------------- runner
 
 ALL=(t1_usage t2_bad_session_id t3_tree_moves t4_large_payload t5_pwd_no_leak
-     t6_family_already_in_dest t7_unrelated_bystanders_block t8_timestamps_preserved
-     t9_tempfile_cleaned t10_messages_survive)
+     t6_family_already_in_dest t7_bystanders_absorbed_but_not_reordered t8_timestamps_preserved
+     t9_tempfile_cleaned t10_messages_survive t11_refuses_home)
 
 WANT=($@)
 setup

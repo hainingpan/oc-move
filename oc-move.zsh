@@ -13,21 +13,27 @@ oc-move() {
   # Must go via a file: `opencode export` truncates its own stdout when piped.
   local tmp=${TMPDIR:-/tmp}/oc-move.$$.json
   opencode export $sid > $tmp || { rm -f $tmp; return 1 }
-  # remember the family's timestamps; the import/re-scope would otherwise bump them
-  local ts=$(sqlite3 $db "$fam SELECT 'UPDATE session SET time_updated='||time_updated||
-      ' WHERE id='''||id||''';' FROM session WHERE id IN (SELECT id FROM d);")
   mkdir -p $dst || { rm -f $tmp; return 1 }
-  ( cd $dst || exit 1
-    if [[ ! -d .git ]]; then
-      # git init promotes this dir to a project, dragging every UNRELATED "global"
-      # session that already lives here along with it and bumping their timestamps.
-      local n=$(sqlite3 $db "$fam SELECT COUNT(*) FROM session
-        WHERE directory='${PWD:A}' AND id NOT IN (SELECT id FROM d);")
-      (( n )) && { print -u2 "abort: $n unrelated sessions live in $PWD; git init would re-scope them"; exit 1 }
-      git init -q && git commit -q --allow-empty -m init
+  local dstr=$(cd $dst && pwd -P) || { rm -f $tmp; return 1 }
+  # `git init` promotes this dir to a project, and opencode then absorbs every
+  # "global" session already living here - bumping their timestamps and reordering
+  # your session list. Snapshot the family AND those bystanders, restore at the end;
+  # then being absorbed is harmless (they belong to this directory anyway).
+  local ts=$(sqlite3 $db "$fam SELECT 'UPDATE session SET time_updated='||time_updated||
+      ' WHERE id='''||id||''';' FROM session WHERE id IN (SELECT id FROM d) OR directory='$dstr';")
+  local n=$(sqlite3 $db "$fam SELECT COUNT(*) FROM session
+      WHERE directory='$dstr' AND id NOT IN (SELECT id FROM d);")
+  if [[ ! -d $dstr/.git ]]; then
+    # Making $HOME (or /) a repo makes every subdirectory look like it is inside one,
+    # which breaks git, shell prompts and opencode's own project detection.
+    if [[ $dstr == $HOME || $dstr == / ]]; then
+      print -u2 "refusing to git init $dstr - choose a real project folder"; rm -f $tmp; return 1
     fi
-    opencode import $tmp ) || { rm -f $tmp; return 1 }
+    ( cd $dstr && git init -q && git commit -q --allow-empty -m init ) || { rm -f $tmp; return 1 }
+  fi
+  ( cd $dstr && opencode import $tmp ) || { rm -f $tmp; return 1 }
   rm -f $tmp
+  (( n )) && print "note: $n session(s) already in $dstr joined this project (timestamps preserved)"
   sqlite3 $db "$fam
     UPDATE session SET project_id=(SELECT project_id FROM session WHERE id='$sid'),
                        directory =(SELECT directory  FROM session WHERE id='$sid')
