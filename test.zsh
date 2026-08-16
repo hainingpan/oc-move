@@ -27,6 +27,11 @@ real_db_fingerprint() {
 REAL_BEFORE=$(real_db_fingerprint)
 
 setup() {
+  # non-interactive ssh often lacks /opt/homebrew/bin; fail with a useful message
+  for bin in opencode sqlite3 git; do
+    whence -p $bin >/dev/null || {
+      print -u2 "FATAL: '$bin' not on PATH. Try: export PATH=/opt/homebrew/bin:\$PATH"; exit 2 }
+  done
   rm -rf $RUN; mkdir -p $RUN
   export XDG_DATA_HOME=$RUN/data
   export TMPDIR=$RUN/tmp; mkdir -p $TMPDIR
