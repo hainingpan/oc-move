@@ -78,6 +78,9 @@ Every one of these is a bug that actually shipped and broke something.
 | **Recursive** CTE for descendants | Subagents spawn subagents. A one-level `WHERE parent_id=` strands grandchildren. |
 | Restore `time_updated` | The move itself would otherwise bump the family to "today" and reorder the picker. |
 | `${1-}` not `$1` | Breaks under `set -u` / `setopt nounset`. |
+| `local dstr` and the assignment on **separate statements** | `local x=$(cmd)` reports *`local`'s* exit status, so `\|\| return 1` was dead code. A failed `cd` left the path empty; unquoted, an empty variable vanishes from the argument list, and bare `cd` goes to `$HOME` — which then got `git init`ed. The `$HOME` refusal can't catch this either, since `"" != $HOME`. |
+| Every path **quoted**, `cd --` | A destination containing a space split into two arguments. |
+| `${dstr//\'/\'\'}` before interpolating into SQL | A path containing `'` broke out of the SQL string literal. |
 
 ## Upstream bugs this works around
 
@@ -101,9 +104,17 @@ Every one of these is a bug that actually shipped and broke something.
   Changing only `info.id` yields a session with **zero messages**, because message ids are
   global primary keys and the inserts silently collide.
 - `zsh -lc` is login-but-non-interactive and does **not** read `.zshrc`.
+- `local x=$(cmd)` **swallows the command's exit status** — you get `local`'s, which is
+  almost always 0. Declare on one line, assign on the next, or your error handling is
+  decoration. Same for `export`, `typeset`, `readonly`, `declare`.
+- An unquoted empty variable **disappears from the argument list** rather than becoming
+  an empty argument. `cd $empty` is therefore bare `cd`, which goes to `$HOME`.
+  (Quoted, `cd "$empty"` is also unsafe in zsh: `cd ""` succeeds and stays put.)
+- The suite refuses to let a regression re-create `$HOME/.git`: it fails loudly and
+  removes it, but only if it appeared during the run.
 
 ## Layout
 
     oc-move.zsh   the function
-    test.zsh      regression suite (isolated; 25 assertions)
+    test.zsh      regression suite (isolated; 30 assertions)
     .backups/     local ~/.zshrc copies (gitignored — see above)

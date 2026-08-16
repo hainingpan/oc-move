@@ -26,6 +26,18 @@ real_db_fingerprint() {
 }
 REAL_BEFORE=$(real_db_fingerprint)
 
+# Safety net. A bug in oc-move (bare `cd` with an empty argument goes to $HOME) once
+# git-init'd the developer's home directory from inside this very suite. No test may
+# create $HOME/.git; if one does, fail loudly and undo it. Only removes a .git that
+# appeared during the run - a pre-existing one is left strictly alone.
+HOME_GIT_BEFORE=0; [[ -d $HOME/.git ]] && HOME_GIT_BEFORE=1
+home_git_guard() {
+  (( HOME_GIT_BEFORE )) && return 0
+  [[ -d $HOME/.git ]] || return 0
+  rm -rf $HOME/.git
+  bad "created \$HOME/.git (removed) - the bare-cd regression is back"
+}
+
 setup() {
   # non-interactive ssh often lacks /opt/homebrew/bin; fail with a useful message
   for bin in opencode sqlite3 git; do
@@ -173,6 +185,36 @@ t9_tempfile_cleaned() {
   check "no temp files left" "${#leftover}" "0"
 }
 
+t12_unreachable_dest_must_not_init_caller() {
+  # `local dstr=$(cd $dst && pwd -P) || ...` : the exit status is `local`'s, NOT the
+  # command substitution's, so that `||` guard was dead code. dstr ended up empty, and
+  # in zsh `cd ""` SUCCEEDS and stays put - so the git init landed in the CALLER's
+  # directory. That is precisely the ~/.git disaster, still reachable.
+  # mkdir -p succeeds on an existing dir regardless of its mode; cd then fails on 000.
+  seed_session ses_t12root - $RUN/src "t12" 1700000000000
+  local dest=$RUN/t12dest; mkdir -p $dest; chmod 000 $dest
+  local caller=$RUN/t12caller; mkdir -p $caller
+  local out rc
+  out=$( cd $caller && oc-move ses_t12root $dest 2>&1 ); rc=$?
+  chmod 755 $dest   # restore so cleanup can remove it
+  check "unreachable dest exits 1" "$rc" "1"
+  if [[ -d $caller/.git ]]; then bad "MUST NOT git init the caller's directory"
+  else ok "caller's directory left alone"; fi
+  local -a leftover=( $TMPDIR/oc-move.*.json(N) )
+  check "no temp file left on the failure path" "${#leftover}" "0"
+}
+
+t13_path_with_space_and_apostrophe() {
+  # Every path was unquoted: a directory containing a space split into two arguments,
+  # and one containing ' broke out of the surrounding SQL string literal.
+  seed_session ses_t13root - $RUN/src "t13" 1700000000000
+  local dest="$RUN/t13 John's dest"
+  local out rc
+  out=$(oc-move ses_t13root "$dest" 2>&1); rc=$?
+  check "move succeeds with space + apostrophe" "$rc" "0"
+  check "landed at the exact path" "$(q "SELECT directory FROM session WHERE id='ses_t13root'")" "${dest:A}"
+}
+
 t10_messages_survive() {
   seed_session ses_t10root - $RUN/src "t10" 1700000000000
   local before=$(q "SELECT COUNT(*) FROM message WHERE session_id='ses_t10root'")
@@ -184,7 +226,8 @@ t10_messages_survive() {
 
 ALL=(t1_usage t2_bad_session_id t3_tree_moves t4_large_payload t5_pwd_no_leak
      t6_family_already_in_dest t7_bystanders_absorbed_but_not_reordered t8_timestamps_preserved
-     t9_tempfile_cleaned t10_messages_survive t11_refuses_home)
+     t9_tempfile_cleaned t10_messages_survive t11_refuses_home
+     t12_unreachable_dest_must_not_init_caller t13_path_with_space_and_apostrophe)
 
 WANT=($@)
 setup
@@ -193,6 +236,7 @@ for t in $ALL; do
   CURRENT=$t
   print "\033[1m$t\033[0m"
   $t
+  home_git_guard
 done
 
 # the whole point: prove we never touched the real database

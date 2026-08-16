@@ -12,27 +12,35 @@ oc-move() {
       UNION ALL SELECT s.id FROM session s JOIN d ON s.parent_id=d.id)"
   # Must go via a file: `opencode export` truncates its own stdout when piped.
   local tmp=${TMPDIR:-/tmp}/oc-move.$$.json
-  opencode export $sid > $tmp || { rm -f $tmp; return 1 }
-  mkdir -p $dst || { rm -f $tmp; return 1 }
-  local dstr=$(cd $dst && pwd -P) || { rm -f $tmp; return 1 }
+  opencode export "$sid" > "$tmp" || { rm -f "$tmp"; return 1 }
+  mkdir -p -- "$dst" || { rm -f "$tmp"; return 1 }
+  # Declare THEN assign. `local dstr=$(...)` reports *local's* exit status, not the
+  # command substitution's, so this `||` used to be dead code: a failed cd left dstr
+  # empty and execution carried on. Unquoted, an empty $dstr then disappears from the
+  # argument list entirely - and a bare `cd` goes to $HOME, so the git init below
+  # turned $HOME into a repo. Quote every path and refuse an empty result.
+  local dstr; dstr=$(cd -- "$dst" && pwd -P) || { rm -f "$tmp"; return 1 }
+  [[ -n $dstr ]] || { print -u2 "cannot resolve $dst"; rm -f "$tmp"; return 1 }
+  # ' delimits SQL strings below; double it so a path like ~/John's dir can't break out
+  local dsq=${dstr//\'/\'\'}
   # `git init` promotes this dir to a project, and opencode then absorbs every
   # "global" session already living here - bumping their timestamps and reordering
   # your session list. Snapshot the family AND those bystanders, restore at the end;
   # then being absorbed is harmless (they belong to this directory anyway).
   local ts=$(sqlite3 $db "$fam SELECT 'UPDATE session SET time_updated='||time_updated||
-      ' WHERE id='''||id||''';' FROM session WHERE id IN (SELECT id FROM d) OR directory='$dstr';")
+      ' WHERE id='''||id||''';' FROM session WHERE id IN (SELECT id FROM d) OR directory='$dsq';")
   local n=$(sqlite3 $db "$fam SELECT COUNT(*) FROM session
-      WHERE directory='$dstr' AND id NOT IN (SELECT id FROM d);")
-  if [[ ! -d $dstr/.git ]]; then
+      WHERE directory='$dsq' AND id NOT IN (SELECT id FROM d);")
+  if [[ ! -d "$dstr/.git" ]]; then
     # Making $HOME (or /) a repo makes every subdirectory look like it is inside one,
     # which breaks git, shell prompts and opencode's own project detection.
     if [[ $dstr == $HOME || $dstr == / ]]; then
-      print -u2 "refusing to git init $dstr - choose a real project folder"; rm -f $tmp; return 1
+      print -u2 "refusing to git init $dstr - choose a real project folder"; rm -f "$tmp"; return 1
     fi
-    ( cd $dstr && git init -q && git commit -q --allow-empty -m init ) || { rm -f $tmp; return 1 }
+    ( cd -- "$dstr" && git init -q && git commit -q --allow-empty -m init ) || { rm -f "$tmp"; return 1 }
   fi
-  ( cd $dstr && opencode import $tmp ) || { rm -f $tmp; return 1 }
-  rm -f $tmp
+  ( cd -- "$dstr" && opencode import "$tmp" ) || { rm -f "$tmp"; return 1 }
+  rm -f "$tmp"
   (( n )) && print "note: $n session(s) already in $dstr joined this project (timestamps preserved)"
   sqlite3 $db "$fam
     UPDATE session SET project_id=(SELECT project_id FROM session WHERE id='$sid'),
